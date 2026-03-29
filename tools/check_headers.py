@@ -1,4 +1,48 @@
-"""check_headers() — Security header audit for a target URL."""
+"""check_headers() — Security header audit for a target URL.
+
+PURPOSE
+-------
+Audits HTTP response headers for security best practices. Missing security
+headers are among the most common web application findings and can enable
+or amplify other vulnerabilities (e.g., missing CSP makes XSS more impactful).
+
+HOW IT WORKS
+------------
+Uses ``httpx`` to fetch the target URL and checks for the presence/absence
+of 10 security-critical response headers, plus flags information-disclosure
+headers that should be removed.
+
+HEADERS CHECKED (based on OWASP Secure Headers Project)
+--------------------------------------------------------
+**Security headers (should be present):**
+- ``Strict-Transport-Security`` (HSTS) — enforces HTTPS
+- ``Content-Security-Policy`` (CSP) — controls resource loading
+- ``X-Content-Type-Options`` — prevents MIME-type sniffing
+- ``X-Frame-Options`` — prevents clickjacking
+- ``X-XSS-Protection`` — legacy XSS filter
+- ``Referrer-Policy`` — controls referrer leakage
+- ``Permissions-Policy`` — restricts browser features (camera, mic, etc.)
+- ``Cross-Origin-Opener-Policy`` (COOP) — isolates browsing context
+- ``Cross-Origin-Resource-Policy`` (CORP) — resource sharing control
+- ``Cross-Origin-Embedder-Policy`` (COEP) — embedding control
+
+**Information disclosure headers (should be removed):**
+- ``Server`` — reveals web server software and version
+- ``X-Powered-By`` — reveals backend framework
+- ``X-AspNet-Version`` — reveals ASP.NET version
+- ``X-AspNetMvc-Version`` — reveals ASP.NET MVC version
+
+WHEN TO USE
+-----------
+- Run on every target as part of the standard assessment.
+- Results are important for the final report and for vulnerability chaining
+  (e.g., missing ``HttpOnly`` on cookies + XSS = session hijacking).
+
+REFERENCE
+---------
+OWASP Secure Headers Project:
+https://owasp.org/www-project-secure-headers/
+"""
 
 import json
 

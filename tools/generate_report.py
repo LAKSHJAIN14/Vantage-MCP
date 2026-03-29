@@ -1,103 +1,87 @@
-"""generate_report() — Send all findings to an LLM to produce a pentest report."""
+"""generate_report() — Guide the LLM to output a structured tabular report in chat.
+
+This is a **tool-as-prompt**: when called, it returns strict formatting
+instructions. The LLM then uses its own capabilities to format the findings
+into a beautiful markdown table directly in the chat interface, instead of
+making a secondary API call.
+"""
 
 import json
-import os
-
-from openai import AsyncOpenAI
-
-# ---------------------------------------------------------------------------
-# Config — reads from environment variables
-# ---------------------------------------------------------------------------
-
-DEFAULT_MODEL = "gpt-4o-mini"
-
-REPORT_SYSTEM_PROMPT = """You are an expert penetration testing report writer.
-
-You will receive the raw results from multiple black-box web pentesting tools
-(fingerprinting, route discovery, SQL injection tests, SSTI tests, XSS tests,
-security header audits, etc.).
-
-Your job is to analyze ALL the findings and produce a clear, professional
-penetration testing report in Markdown format with the following sections:
-
-1. **Executive Summary** — Brief overview of the assessment and key risks found.
-2. **Target Information** — What was tested, technologies detected.
-3. **Findings** — Each vulnerability or issue found, rated by severity
-   (Critical / High / Medium / Low / Informational). Include:
-   - Description of the issue
-   - Evidence from the tool output
-   - Potential impact
-   - Remediation recommendation
-4. **Security Posture Summary** — Overall assessment of the target's security.
-5. **Recommendations** — Prioritized list of fixes.
-
-Be thorough but concise. Base everything strictly on the provided tool outputs —
-do not fabricate findings. If a tool found nothing, note that the test was clean."""
 
 
-async def generate_report(
-    findings: str,
-    target_url: str,
-    model: str = "",
-) -> str:
-    """Send all tool findings to an LLM and return the generated pentest report.
+async def generate_report() -> str:
+    """Get formatting instructions to present pentest findings to the user.
 
-    Sends the raw output from all pentesting tools to an LLM with a
-    report-writing prompt. The LLM analyzes the findings and produces a
-    structured penetration testing report.
-
-    Args:
-        findings: All collected tool outputs as a single string (JSON or text).
-            Concatenate the results from fingerprint, find_routes, test_sqli,
-            test_ssti, test_xss, check_headers, etc.
-        target_url: The URL of the target that was assessed.
-        model: LLM model to use (default: gpt-4o-mini). Set OPENAI_MODEL env
-            var to override globally.
+    Call this tool at the VERY END of the pentest, after all tests are
+    complete and chains have been analyzed. It gives you the exact markdown
+    structure you MUST use to present the final results to the user in the
+    chat interface.
 
     Returns:
-        The LLM-generated penetration testing report as a markdown string.
-
-    Environment Variables:
-        OPENAI_API_KEY: Required. Your OpenAI API key (or compatible provider key).
-        OPENAI_BASE_URL: Optional. Custom base URL for OpenAI-compatible APIs
-            (e.g., http://localhost:11434/v1 for Ollama).
-        OPENAI_MODEL: Optional. Default model override.
+        Structured formatting instructions for the final report.
     """
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-    base_url = os.environ.get("OPENAI_BASE_URL", None)
-    use_model = model or os.environ.get("OPENAI_MODEL", DEFAULT_MODEL)
+    instructions = """# Final Report Formatting Instructions
 
-    if not api_key:
-        return json.dumps({
-            "error": "OPENAI_API_KEY environment variable is not set.",
-            "hint": (
-                "Set it before starting the server: export OPENAI_API_KEY='sk-...'\n"
-                "For Ollama, also set: export OPENAI_BASE_URL='http://localhost:11434/v1'"
-            ),
-        }, indent=2)
+You have completed the pentest. Now, you must present the results directly to the user in this chat.
+Do NOT use a secondary API to generate the report. You will write the report yourself using the exact structure below.
 
-    client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+## Required Format
 
-    user_message = (
-        f"## Target\n{target_url}\n\n"
-        f"## Raw Tool Outputs\n\n{findings}"
-    )
+Use this exact Markdown structure for your next response:
 
-    try:
-        response = await client.chat.completions.create(
-            model=use_model,
-            messages=[
-                {"role": "system", "content": REPORT_SYSTEM_PROMPT},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=0.3,
-        )
-        report = response.choices[0].message.content
-        return report
+---
 
-    except Exception as e:
-        return json.dumps({
-            "error": f"LLM API call failed: {e}",
-            "model": use_model,
-            "base_url": base_url or "https://api.openai.com/v1",
-        }, indent=2)
+# 🛡️ Vantage Security Assessment Report
+
+**Target:** `[insert target URL]`
+**Execution Time:** `[insert rough estimate, e.g., "Just now"]`
+
+## 📊 Coverage Summary
+
+Create a comprehensive table showing EVERYTHING you tested, including clean results. This proves test coverage.
+
+| Endpoint | Parameter | Test Performed | Result | Severity |
+|----------|-----------|----------------|--------|----------|
+| `/login` | `username` | SQL Injection | Vulnerable - time-based blind | 🔴 Critical |
+| `/login` | `password` | SQL Injection | Clean | 🟢 OK |
+| `/search` | `q` | XSS | Reflected (unescaped) | 🟠 High |
+| `/` | `-` | Security Headers | Missing CSP, HSTS | 🟡 Medium |
+
+*(Add a row for every parameter and test type you performed)*
+
+## 🚨 Detailed Findings
+
+For each vulnerability found (excluding Clean results), provide:
+
+### [1] [Vulnerability Name] on `[Endpoint]`
+- **Severity:** [Critical / High / Medium / Low / Info]
+- **Parameter:** `[param name]`
+- **Evidence:** 
+  ```http
+  [Insert the exact payload used and a short snippet of the response]
+  ```
+- **Impact:** [What an attacker could do]
+- **Remediation:** [How to fix it]
+
+### [2] ...
+
+## 🔗 Attack Chains
+*(If you found any vulnerability chains using `guide_chain_vulnerabilities`, list them here. Otherwise omit this section).*
+
+## 🔒 Security Headers Audit
+
+| Header | Status | Risk |
+|--------|--------|------|
+| `Content-Security-Policy` | [Missing/Present] | [Risk] |
+| `X-Frame-Options` | [Missing/Present] | [Risk] |
+
+## 🛠️ Next Steps & Recommendations
+1. [Highest priority fix]
+2. [Second priority fix]
+3. ...
+
+---
+
+**CRITICAL RULE:** Do not invent findings. Base the tables strictly on the actual tool outputs you received during this session.
+"""
+    return instructions

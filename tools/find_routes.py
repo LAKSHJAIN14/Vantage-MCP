@@ -1,4 +1,52 @@
-"""find_routes() — Discover endpoints via crawling + gobuster CLI for directory brute-forcing."""
+"""find_routes() — Discover endpoints via crawling + gobuster CLI for directory brute-forcing.
+
+PURPOSE
+-------
+Discovers all accessible routes, endpoints, forms, and API paths on the
+target web application. This is the **second tool to use** (after
+``fingerprint``) and provides the attack surface map for vulnerability testing.
+
+HOW IT WORKS
+------------
+Two complementary discovery methods:
+
+1. **HTML Crawling** (always runs) — uses ``httpx`` + ``BeautifulSoup``:
+   - Follows ``<a href>``, ``<form action>``, ``<script src>``, ``<link href>``
+   - Extracts API paths from inline JavaScript (``fetch()``, ``axios``, etc.)
+   - Parses forms with all input fields (for injection testing later)
+   - BFS crawl with configurable depth (default 2 levels deep)
+
+2. **Gobuster directory brute-forcing** (optional, ``use_gobuster=True``):
+   - Runs ``gobuster dir`` CLI to find hidden directories/files
+   - Uses wordlists: custom → ``/usr/share/wordlists/dirb/common.txt`` →
+     bundled ``wordlists/common.txt``
+   - Supports extra args like ``-x php,html -t 50`` for extensions/threads
+
+GOBUSTER CLI REFERENCE
+----------------------
+Gobuster is a directory/file brute-forcing tool. Key options when using
+``gobuster_extra_args``:
+
+    -x <ext>      File extensions to search for (e.g., "php,html,txt,bak")
+    -t <n>        Number of concurrent threads (default 10)
+    -s <codes>    Positive status codes (default "200,204,301,302,307,401,403")
+    -b <codes>    Negative status codes to ignore
+    --timeout <s> HTTP timeout per request
+    -c <cookie>   Cookie string to include
+    -H <header>   Custom header (can be used multiple times)
+    -a <agent>    User-Agent string
+    -k            Skip TLS certificate verification
+    --wildcard    Force processing of wildcard responses
+
+WHEN TO USE
+-----------
+- After ``fingerprint()`` to map the full attack surface.
+- Enable ``use_gobuster=True`` when crawling finds few routes (common with
+  SPAs or apps that hide admin panels).
+- Increase ``depth`` if the app has deeply nested page structures.
+- The discovered forms and parameters become targets for ``test_sqli``,
+  ``test_ssti``, and ``test_xss``.
+"""
 
 import asyncio
 import json
@@ -127,11 +175,25 @@ async def _run_gobuster(url: str, wordlist: str | None = None, extra_args: str =
         # Use our bundled wordlist
         wl = os.path.abspath(WORDLIST_PATH)
 
-    cmd = f"gobuster dir -u {url} -w {wl} -q --no-color {extra_args}"
+    cmd_args: list[str] = [
+        "gobuster", "dir",
+        "-u", url,
+        "-w", wl,
+        "-q",
+        "--no-color",
+    ]
+
+    if extra_args:
+        import shlex
+        cmd_args.extend(shlex.split(extra_args))
+
+    # Human-readable command string for logging only (not executed)
+    import shlex as _shlex
+    cmd = " ".join(_shlex.quote(a) for a in cmd_args)
 
     try:
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
+        proc = await asyncio.create_subprocess_exec(
+            *cmd_args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

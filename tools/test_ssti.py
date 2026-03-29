@@ -1,4 +1,41 @@
-"""test_ssti() — Server-Side Template Injection detection with multi-engine payloads."""
+"""test_ssti() — Server-Side Template Injection detection with multi-engine payloads.
+
+PURPOSE
+-------
+Detects Server-Side Template Injection (SSTI) vulnerabilities by injecting
+payloads targeting multiple template engines and checking whether the server
+**evaluates** them (e.g., ``{{7*7}}`` returning ``49`` in the response).
+
+HOW IT WORKS
+------------
+Uses ``httpx`` (via the shared HTTP client) to:
+1. Inject template syntax payloads into the target parameter.
+2. Check if the **computed result** (not the raw payload) appears in the
+   response body — indicating the server executed the template expression.
+3. Tests across multiple template engines with engine-specific payloads.
+
+TEMPLATE ENGINES COVERED
+-------------------------
+- **Jinja2** (Python/Flask): ``{{7*7}}``, ``{{config}}``, MRO chain payloads
+- **Twig** (PHP/Symfony): ``{{7*7}}``, ``{{_self.env}}``
+- **Freemarker** (Java): ``${7*7}``, Execute class payloads
+- **ERB** (Ruby/Rails): ``<%= 7*7 %>``
+- **Smarty** (PHP): ``{php}echo 7*7;{/php}``
+- **Velocity** (Java/Apache): ``#set($x=7*7)$x``
+- **Handlebars** (JavaScript): ``{{#with}}`` payloads
+- **Mako** (Python): ``${7*7}``
+- **Pug/Slim** (Node.js/Ruby): ``#{7*7}``
+- **Thymeleaf** (Java/Spring): ``${{7*7}}``
+
+WHEN TO USE
+-----------
+- Test parameters that **render user input** in page templates (search results
+  displayed on page, user profile names, comment previews, etc.).
+- Especially important on Python (Flask/Django) and PHP (Symfony/Laravel) apps.
+- If SSTI is confirmed, it often leads to **Remote Code Execution (RCE)** —
+  this is typically a Critical severity finding.
+- Use ``curl_request`` to manually verify and escalate confirmed findings.
+"""
 
 import json
 import re

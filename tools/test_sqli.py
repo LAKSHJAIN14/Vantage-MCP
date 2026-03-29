@@ -1,4 +1,59 @@
-"""test_sqli() — SQL injection testing via sqlmap CLI."""
+"""test_sqli() — SQL injection testing via sqlmap CLI.
+
+PURPOSE
+-------
+Detects SQL injection vulnerabilities by running ``sqlmap`` — the industry-
+standard automated SQL injection tool — against a target URL and parameter.
+
+HOW IT WORKS
+------------
+Wraps the ``sqlmap`` command-line tool:
+1. Builds a sqlmap command with the target URL, parameter, and options.
+2. Runs sqlmap in ``--batch`` (non-interactive) mode with ``--flush-session``.
+3. Parses the stdout output to extract: vulnerable parameters, injection
+   types (boolean-blind, time-blind, UNION, error-based, stacked queries),
+   detected DBMS, and raw findings.
+
+SQLMAP CLI REFERENCE
+--------------------
+sqlmap is a powerful SQL injection tool. Key options that can be passed via
+``extra_args``:
+
+    --level=<1-5>       Test thoroughness (1=basic, 5=exhaustive)
+    --risk=<1-3>        Risk of tests (1=safe, 3=OR-based/heavy queries)
+    -p <param>          Specific parameter to test
+    --data=<data>       POST data string
+    --dbms=<dbms>       Force backend DBMS (mysql, postgresql, mssql, oracle, sqlite)
+    --threads=<n>       Number of concurrent threads (default 1, max 10)
+    --technique=<tech>  SQL injection techniques to test:
+                          B=Boolean-blind, T=Time-blind, U=UNION,
+                          E=Error-based, S=Stacked queries
+    --prefix=<prefix>   Injection payload prefix
+    --suffix=<suffix>   Injection payload suffix
+    --tamper=<script>   Tamper scripts for WAF bypass (e.g., space2comment,
+                          randomcase, between)
+    --dbs               Enumerate databases
+    --tables            Enumerate tables
+    --dump              Dump table contents
+    --os-shell          Attempt OS command execution
+    --cookie=<cookie>   HTTP Cookie header value
+    --random-agent      Use random User-Agent header
+    --proxy=<proxy>     Use a proxy (http://host:port)
+    --tor               Use Tor anonymity network
+
+REQUIREMENTS
+------------
+``sqlmap`` must be installed and available in PATH.
+Install: ``sudo apt install sqlmap`` or ``pip install sqlmap``
+
+WHEN TO USE
+-----------
+- Test every parameter discovered by ``find_routes()`` that interacts with
+  a database (search, login, product IDs, filters, etc.).
+- Start with ``level=1, risk=1`` for speed. Increase if initial scan is
+  clean but the parameter looks database-backed.
+- Use ``--dbms=mysql`` (via extra_args) if fingerprinting revealed the DBMS.
+"""
 
 import asyncio
 import json
@@ -41,32 +96,37 @@ async def test_sqli(
     Returns:
         JSON string with sqlmap findings.
     """
-    # Build the sqlmap command
-    cmd_parts = [
+    # Build the sqlmap command as a safe argument list — never pass
+    # user-controlled strings through a shell to avoid command injection.
+    cmd_args: list[str] = [
         "sqlmap",
-        f"-u \"{url}\"",
-        "--batch",                    # Non-interactive
+        "-u", url,
+        "--batch",                     # Non-interactive
         f"--level={level}",
         f"--risk={risk}",
-        "--flush-session",            # Fresh scan every time
+        "--flush-session",             # Fresh scan every time
         "--disable-coloring",
     ]
 
     if param:
-        cmd_parts.append(f"-p {param}")
+        cmd_args.extend(["-p", param])
 
     if data:
-        cmd_parts.append(f"--data=\"{data}\"")
+        cmd_args.extend(["--data", data])
 
     if extra_args:
-        cmd_parts.append(extra_args)
+        # Safely tokenize extra_args without shell interpretation
+        import shlex
+        cmd_args.extend(shlex.split(extra_args))
 
-    cmd = " ".join(cmd_parts)
+    # Human-readable command string for logging only (not executed)
+    import shlex as _shlex
+    cmd_display = " ".join(_shlex.quote(a) for a in cmd_args)
 
-    # Run sqlmap
+    # Run sqlmap via exec (no shell) — safe from injection
     try:
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
+        proc = await asyncio.create_subprocess_exec(
+            *cmd_args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -74,13 +134,13 @@ async def test_sqli(
     except asyncio.TimeoutError:
         return json.dumps({
             "error": f"sqlmap timed out after {timeout} seconds",
-            "command": cmd,
+            "command": cmd_display,
             "hint": "Try increasing the timeout or narrowing the test with -p <param>",
         }, indent=2)
     except FileNotFoundError:
         return json.dumps({
             "error": "sqlmap is not installed or not in PATH. Install it with: sudo apt install sqlmap",
-            "command": cmd,
+            "command": cmd_display,
         }, indent=2)
 
     stdout_text = stdout.decode(errors="replace")
@@ -90,12 +150,12 @@ async def test_sqli(
         return json.dumps({
             "error": f"sqlmap exited with code {proc.returncode}",
             "stderr": stderr_text.strip(),
-            "command": cmd,
+            "command": cmd_display,
         }, indent=2)
 
     # Parse sqlmap output
     results = _parse_sqlmap_output(stdout_text)
-    results["command"] = cmd
+    results["command"] = cmd_display
 
     return json.dumps(results, indent=2)
 
@@ -167,4 +227,4 @@ def _parse_sqlmap_output(output: str) -> dict:
     # De-duplicate injection types
     result["injection_types"] = list(dict.fromkeys(result["injection_types"]))
 
-    return result
+    return json.dumps(result, indent=2)

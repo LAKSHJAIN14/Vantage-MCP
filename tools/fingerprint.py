@@ -1,4 +1,34 @@
-"""fingerprint() — Technology & framework fingerprinting via response analysis."""
+"""fingerprint() — Technology & framework fingerprinting via response analysis.
+
+PURPOSE
+-------
+Identifies the technology stack of a target web application by analyzing
+HTTP response headers, cookies, HTML meta tags, and probing well-known
+technology-specific paths. This is the **first tool to use** in any pentest.
+
+HOW IT WORKS
+------------
+Uses ``httpx`` (via the shared HTTP client) to:
+
+1. **Fetch the main page** and analyze response headers for server software,
+   framework-specific headers (``X-Powered-By``, ``X-AspNet-Version``, etc.),
+   and CDN/proxy indicators (Cloudflare, Varnish, AWS CloudFront).
+2. **Analyze cookies** — session cookie names reveal the backend
+   (``PHPSESSID`` → PHP, ``JSESSIONID`` → Java, ``connect.sid`` → Express).
+3. **Parse HTML meta tags** — the ``<meta name="generator">`` tag often
+   reveals CMS name and version (WordPress, Drupal, etc.).
+4. **Probe known paths** — requests paths like ``/wp-login.php``,
+   ``/admin/login/``, ``/.git/HEAD``, ``/.env`` to detect specific
+   technologies and critical exposures.
+
+WHEN TO USE
+-----------
+- **Always run first** — fingerprinting results inform which vulnerability
+  tests to prioritize.
+- Results from this tool help you understand what template engine to expect
+  (for SSTI), what database might be in use (for SQLi), and what
+  framework-specific vulnerabilities to look for.
+"""
 
 import json
 import re
@@ -69,13 +99,23 @@ async def fingerprint(url: str) -> str:
     """Identify technologies, frameworks, cookies, and server info for a target URL.
 
     Analyzes HTTP response headers, cookies, HTML meta tags, and probes common
-    technology-specific paths to build a technology profile.
+    technology-specific paths to build a comprehensive technology profile of
+    the target. This should be the **first tool called** in any pentest
+    engagement.
+
+    Session cookies from a prior ``authenticate()`` call are automatically
+    included.
 
     Args:
         url: The target URL to fingerprint (e.g., https://example.com).
 
     Returns:
-        JSON string containing all fingerprinting findings.
+        JSON string containing:
+        - ``server``: Web server software (Apache, Nginx, etc.)
+        - ``technologies``: All detected technologies and frameworks.
+        - ``cookies``: Cookie details with security flag analysis.
+        - ``meta_generator``: CMS generator tag if found.
+        - ``probed_paths``: Results of probing known tech-specific paths.
     """
     results: dict = {
         "target": url,

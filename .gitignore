@@ -11,3 +11,9 @@ wheels/
 
 # Environment secrets
 .env
+.env.local
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
